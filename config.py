@@ -28,7 +28,7 @@ COLORS = [
 ]
 
 # Game settings
-INITIAL_SPEED = 200  # milliseconds per game tick
+INITIAL_SPEED = 400  # milliseconds per game tick
 SCORE_PER_LINE = 100  # Standard Tetris scoring multiplier
 
 # File paths
