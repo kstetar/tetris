@@ -1,17 +1,27 @@
-"""Pygame entry point for the Tetris game."""
+"""Neon Tetris — pygame entry point."""
 
-import pygame
+from __future__ import annotations
+
 import sys
 
-from config import BLOCK_SIZE, COLS, INITIAL_SPEED, ROWS, SOFT_DROP_SPEED
+import pygame
+
+from config import (
+    ARR_MS,
+    BLOCK_SIZE,
+    COLS,
+    DAS_DELAY_MS,
+    PANEL_WIDTH,
+    ROWS,
+)
 from game_state import GameState
 from renderer import Renderer
 from sound import SoundManager
 
+MENU, PLAYING, SCORES = "menu", "playing", "scores"
+
 
 class TetrisGame:
-    """Coordinate game state, Pygame events, rendering, and sound."""
-
     def __init__(self, screen):
         self.screen = screen
         self.renderer = Renderer(screen)
@@ -19,189 +29,272 @@ class TetrisGame:
         self.sound = SoundManager()
         self.clock = pygame.time.Clock()
         self.running = True
-        self.last_tick = pygame.time.get_ticks()
-        self.drop_tick = pygame.time.get_ticks()
-        self.reset_game()
+        self.scene = MENU
+        self.menu_index = 0
+        self.das_dir = 0
+        self.das_timer = 0
+        self.arr_timer = 0
+        self.initials = ""
+        self.entering_score = False
+        self.sound.start_music()
 
     def reset_game(self, event=None):
-        """Reset the game to its initial state."""
         self.game_state.reset()
-        self.renderer.update_score_label(self.game_state.score)
-        self.renderer.update_high_score_label(self.game_state.high_score)
-        self.renderer.update_level_label(self.game_state.level)
-        self.renderer.update_lines_label(self.game_state.lines_cleared_total)
-        self.renderer.update_combo(0)
-        self.renderer.draw_next_piece(self.game_state.get_next_piece())
-        self.last_tick = pygame.time.get_ticks()
-        self.drop_tick = pygame.time.get_ticks()
+        self.entering_score = False
+        self.initials = ""
+        self.das_dir = 0
+        self._sync_hud()
+        self.renderer.banner = None
+        self.renderer.floaters.clear()
+        self.sound.start_music()
 
-    def handle_key(self, key):
-        """Handle one supported keyboard key."""
+    def start_play(self):
+        self.reset_game()
+        self.scene = PLAYING
+        self.sound.play_select()
+
+    def _sync_hud(self):
+        gs = self.game_state
+        r = self.renderer
+        r.update_score_label(gs.score)
+        r.update_high_score_label(gs.high_score())
+        r.update_level_label(gs.level)
+        r.update_lines_label(gs.lines_cleared_total)
+        r.update_combo(gs.combo)
+        r.back_to_back = gs.back_to_back
+        r.update_particles(gs.particles)
+        r.set_queue(gs.get_queue())
+        r.set_held(gs.get_held(), gs.hold_used)
+        r.clearing_rows = list(gs.clearing_rows)
+        r.stats = gs.stats
+
+    def handle_event(self, event):
+        if event.type == pygame.QUIT:
+            self.running = False
+            return
+        if event.type != pygame.KEYDOWN:
+            if event.type == pygame.KEYUP and event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_a, pygame.K_d):
+                self.das_dir = 0
+            return
+
+        key = event.key
+        if key == pygame.K_m:
+            on = self.sound.toggle_music()
+            self.renderer.add_floater("MUSIC ON" if on else "MUSIC OFF", (180, 220, 255), y=80)
+            return
+
+        if self.scene == MENU:
+            self._menu_key(key)
+            return
+        if self.scene == SCORES:
+            if key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_q):
+                self.scene = MENU
+                self.sound.play_select()
+            return
+        self._play_key(key, event)
+
+    def _menu_key(self, key):
         if key in (pygame.K_ESCAPE, pygame.K_q):
             self.running = False
             return
+        if key in (pygame.K_DOWN, pygame.K_s):
+            self.menu_index = (self.menu_index + 1) % 3
+            self.sound.play_move()
+        elif key in (pygame.K_UP, pygame.K_w):
+            self.menu_index = (self.menu_index - 1) % 3
+            self.sound.play_move()
+        elif key in (pygame.K_RETURN, pygame.K_SPACE):
+            if self.menu_index == 0:
+                self.start_play()
+            elif self.menu_index == 1:
+                self.scene = SCORES
+                self.sound.play_select()
+            else:
+                self.running = False
+
+    def _play_key(self, key, event):
+        gs = self.game_state
+
+        if self.entering_score:
+            if key == pygame.K_BACKSPACE:
+                self.initials = self.initials[:-1]
+            elif key == pygame.K_RETURN and len(self.initials) >= 1:
+                gs.submit_highscore(self.initials.ljust(3, "A"))
+                self.entering_score = False
+                self.sound.play_select()
+            elif event.unicode and event.unicode.isalnum() and len(self.initials) < 3:
+                self.initials += event.unicode.upper()
+                self.sound.play_move()
+            return
+
         if key == pygame.K_F5:
             self.reset_game()
             return
-        if key == pygame.K_p:
-            self.game_state.paused = not self.game_state.paused
+        if key in (pygame.K_p,):
+            if not gs.game_over:
+                gs.paused = not gs.paused
             return
-        if self.game_state.game_over or self.game_state.paused:
-            return
-
-        # Map keys to actions
-        key_actions = {
-            pygame.K_LEFT: ("Left", "move"),
-            pygame.K_RIGHT: ("Right", "move"),
-            pygame.K_DOWN: ("Down", "drop"),
-            pygame.K_UP: ("Up", "rotate"),
-            pygame.K_SPACE: ("HardDrop", "hard_drop"),
-        }
-        
-        action_info = key_actions.get(key)
-        if action_info is None:
-            return
-        
-        action_name, sound_type = action_info
-        self.game_state.queue_key(action_name)
-        
-        if sound_type == "move":
-            self.sound.play_move()
-        elif sound_type == "rotate":
-            self.sound.play_rotate()
-        elif sound_type == "hard_drop":
-            self.sound.play_hard_drop()
-
-    def update(self):
-        """Advance the game when the configured tick interval elapses."""
-        now = pygame.time.get_ticks()
-        
-        # Handle game over or paused
-        if self.game_state.game_over or self.game_state.paused:
-            self.game_state.update_particles()
-            return
-        
-        # Speed based on level and soft drop
-        if self.game_state.drop_delay == SOFT_DROP_SPEED:
-            current_speed = SOFT_DROP_SPEED
-        else:
-            # Calculate speed based on level (faster as levels progress)
-            base_speed = INITIAL_SPEED
-            level_multiplier = max(0.5, 1.0 - (self.game_state.level - 1) * 0.05)
-            current_speed = int(base_speed * level_multiplier)
-        
-        # Check if it's time to move piece down
-        if now - self.drop_tick >= current_speed:
-            self.drop_tick = now
-            
-            # Check if piece can move down
-            if self.game_state.is_valid_move(
-                self.game_state.current_piece["x"],
-                self.game_state.current_piece["y"] + 1,
-                self.game_state.current_piece["shape"]
-            ):
-                self.game_state.current_piece["y"] += 1
-                self.sound.play_drop()
+        if key == pygame.K_ESCAPE:
+            if gs.paused or gs.game_over:
+                self.scene = MENU
+                self.sound.start_music()
             else:
-                # Lock the piece
-                self.game_state.merge_piece_to_board()
-                lines_cleared = self.game_state.clear_lines()
-                
-                if lines_cleared > 0:
-                    self.sound.play_line_clear()
-                    # Combo check
-                    if self.game_state.combo > 1:
-                        self.sound.play_combo()
-                    # Level up check
-                    if self.game_state.level_up:
-                        self.sound.play_level_up()
-                        self.renderer.set_level_up_effect()
-                
-                # Spawn new piece
-                self.game_state.current_piece = self.game_state.new_piece()
-                
-                # Check for game over
-                if not self.game_state.is_valid_move(
-                    self.game_state.current_piece["x"],
-                    self.game_state.current_piece["y"],
-                    self.game_state.current_piece["shape"]
-                ):
-                    self.game_state.game_over = True
-                    self.game_state.check_high_score()
-                    self.sound.play_game_over()
-        
-        # Process input queue
-        self.game_state.process_key_queue()
-        
-        # Update particles
-        self.game_state.update_particles()
+                gs.paused = True
+            return
+        if gs.game_over and key == pygame.K_RETURN:
+            self.scene = MENU
+            return
+        if gs.game_over or gs.paused:
+            return
+
+        if key in (pygame.K_LEFT, pygame.K_a):
+            if gs.move(-1, 0):
+                self.sound.play_move()
+            self.das_dir = -1
+            self.das_timer = 0
+            self.arr_timer = 0
+        elif key in (pygame.K_RIGHT, pygame.K_d):
+            if gs.move(1, 0):
+                self.sound.play_move()
+            self.das_dir = 1
+            self.das_timer = 0
+            self.arr_timer = 0
+        elif key in (pygame.K_UP, pygame.K_x, pygame.K_w):
+            if gs.rotate(1):
+                self.sound.play_rotate()
+        elif key in (pygame.K_z, pygame.K_LCTRL, pygame.K_RCTRL):
+            if gs.rotate(-1):
+                self.sound.play_rotate()
+        elif key == pygame.K_SPACE:
+            gs.hard_drop()
+            self.sound.play_hard_drop()
+        elif key in (pygame.K_c, pygame.K_LSHIFT, pygame.K_RSHIFT):
+            if gs.hold():
+                self.sound.play_hold()
+
+    def _handle_das(self, dt):
+        gs = self.game_state
+        if gs.game_over or gs.paused or self.scene != PLAYING or not self.das_dir:
+            return
+        keys = pygame.key.get_pressed()
+        left = keys[pygame.K_LEFT] or keys[pygame.K_a]
+        right = keys[pygame.K_RIGHT] or keys[pygame.K_d]
+        if self.das_dir < 0 and not left:
+            self.das_dir = 0
+            return
+        if self.das_dir > 0 and not right:
+            self.das_dir = 0
+            return
+        self.das_timer += dt
+        if self.das_timer < DAS_DELAY_MS:
+            return
+        self.arr_timer += dt
+        while self.arr_timer >= ARR_MS:
+            self.arr_timer -= ARR_MS
+            if gs.move(self.das_dir, 0):
+                self.sound.play_move()
+            else:
+                break
+
+    def _dispatch_events(self, events):
+        r = self.renderer
+        s = self.sound
+        for ev in events:
+            name = ev["name"]
+            if name == "lock":
+                s.play_lock()
+            elif name == "hard_drop":
+                r.trigger_shake(5 + min(8, ev.get("cells", 0) // 3))
+            elif name == "line_clear":
+                s.play_line_clear()
+                n = ev.get("lines", 1)
+                r.trigger_flash((180, 255, 255), 0.25)
+                r.add_floater(["", "SINGLE", "DOUBLE", "TRIPLE"][n] if n < 4 else "TETRIS", (180, 255, 255))
+            elif name == "tetris":
+                s.play_tetris()
+                r.trigger_shake(14)
+                r.trigger_flash((0, 255, 255), 0.55)
+                r.show_banner("TETRIS", (0, 255, 255), 80)
+            elif name == "tspin":
+                s.play_tspin()
+                r.trigger_shake(10)
+                r.trigger_flash((210, 80, 255), 0.4)
+                r.show_banner("T-SPIN", (210, 80, 255), 80)
+            elif name == "combo":
+                s.play_combo()
+                r.add_floater(f"x{ev.get('combo', 2)}", (255, 200, 60), y=280)
+            elif name == "back_to_back":
+                s.play_back_to_back()
+                r.show_banner("BACK-TO-BACK", (255, 210, 80), 55)
+            elif name == "level_up":
+                s.play_level_up()
+                r.set_level_up_effect()
+                r.trigger_flash((0, 255, 180), 0.35)
+            elif name == "game_over":
+                s.play_game_over()
+                r.trigger_shake(16)
+                if self.game_state.qualifies_for_highscore():
+                    self.entering_score = True
+                    self.initials = ""
+            elif name == "hold":
+                pass
+
+    def update(self, dt):
+        self.renderer.tick(dt)
+        if self.scene != PLAYING:
+            return
+        gs = self.game_state
+        if gs.game_over or gs.paused:
+            gs.update_particles()
+            return
+        self._handle_das(dt)
+        keys = pygame.key.get_pressed()
+        soft = keys[pygame.K_DOWN] or keys[pygame.K_s]
+        events = gs.update(dt, soft_drop=soft)
+        self._dispatch_events(events)
 
     def draw(self):
-        """Render the current game state."""
-        piece = self.game_state.current_piece
-        ghost_piece = None
-        
+        if self.scene == MENU:
+            self.renderer.draw_menu(self.menu_index, self.game_state.high_score())
+            pygame.display.flip()
+            return
+        if self.scene == SCORES:
+            self.renderer.draw_scores(self.game_state.high_scores)
+            pygame.display.flip()
+            return
+
+        gs = self.game_state
+        piece = gs.current_piece
+        ghost = None
         if piece:
-            ghost_y = self.game_state.get_ghost_y()
-            ghost_piece = {
+            ghost = {
                 "shape": piece["shape"],
                 "color": piece["color"],
                 "x": piece["x"],
-                "y": ghost_y,
+                "y": gs.get_ghost_y(),
             }
-
-        # Update renderer with current game state
-        self.renderer.update_score_label(self.game_state.score)
-        self.renderer.update_high_score_label(self.game_state.high_score)
-        self.renderer.update_level_label(self.game_state.level)
-        self.renderer.update_lines_label(self.game_state.lines_cleared_total)
-        self.renderer.update_combo(self.game_state.combo)
-        self.renderer.update_particles(self.game_state.particles)
-        self.renderer.draw_next_piece(self.game_state.get_next_piece())
-        
-        self.renderer.draw_board(self.game_state.board, piece, ghost_piece)
-        
-        # Draw level up effect
-        self.renderer.draw_level_up()
-        
-        if self.game_state.game_over:
-            self.renderer.draw_game_over(self.game_state.score)
-        elif self.game_state.paused:
+        self._sync_hud()
+        self.renderer.draw_board(gs.board, piece, ghost)
+        if gs.game_over:
+            self.renderer.draw_game_over(gs.score, self.initials, self.entering_score)
+        elif gs.paused:
             self.renderer.draw_pause_indicator()
-        
         pygame.display.flip()
 
     def run(self):
-        """Run the event and rendering loop."""
         while self.running:
+            dt = self.clock.tick(120)
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                elif event.type == pygame.KEYDOWN:
-                    self.handle_key(event.key)
-                elif event.type == pygame.KEYUP:
-                    # Reset drop speed when releasing down key
-                    if event.key == pygame.K_DOWN:
-                        self.game_state.drop_delay = INITIAL_SPEED
-            
-            # Check for held keys
-            keys = pygame.key.get_pressed()
-            if not self.game_state.game_over and not self.game_state.paused:
-                if keys[pygame.K_DOWN]:
-                    self.game_state.drop_delay = SOFT_DROP_SPEED
-            
-            self.update()
+                self.handle_event(event)
+            self.update(dt)
             self.draw()
-            self.clock.tick(120)
 
 
-if __name__ == "__main__":
+def main():
     pygame.init()
-    
+    pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
     try:
-        screen = pygame.display.set_mode(
-            (COLS * BLOCK_SIZE + Renderer.PANEL_WIDTH, ROWS * BLOCK_SIZE)
-        )
+        screen = pygame.display.set_mode((COLS * BLOCK_SIZE + PANEL_WIDTH, ROWS * BLOCK_SIZE))
     except pygame.error as error:
         pygame.quit()
         raise SystemExit(f"Unable to create the game window: {error}") from error
@@ -214,6 +307,14 @@ if __name__ == "__main__":
         )
 
     pygame.display.set_caption("Neon Tetris")
-    game = TetrisGame(screen)
-    game.run()
+    try:
+        pygame.mouse.set_visible(False)
+    except pygame.error:
+        pass
+    TetrisGame(screen).run()
     pygame.quit()
+
+
+if __name__ == "__main__":
+    main()
+    sys.exit(0)
