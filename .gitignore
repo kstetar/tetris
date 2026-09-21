@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 tetris_highscores.json
 
 
@@ -5,3 +6,15 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+=======
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.log
+.DS_Store
+tetris_highscores.json
+.venv/
+
+>>>>>>> 5ef8416 (chore: add .gitignore, remove pycache)
