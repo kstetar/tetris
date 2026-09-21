@@ -472,19 +472,27 @@ class GameState:
             self._lock_current()
             return self.events
 
-        grav = SOFT_DROP_MS if soft_drop else gravity_ms(self.level)
-        self.drop_delay = grav
-        self._grav_acc = getattr(self, "_grav_acc", 0) + dt_ms
-        while self._grav_acc >= grav and self.current_piece and not self.force_lock:
-            self._grav_acc -= grav
-            if not self._grounded():
+        grav = gravity_ms(self.level)
+        self.drop_delay = SOFT_DROP_MS if soft_drop else grav
+        
+        if soft_drop:
+            # Soft drop: move 1 cell per frame (not time-accumulated)
+            if self.current_piece and not self._grounded() and not self.force_lock:
                 self.current_piece["y"] += 1
-                if soft_drop:
-                    self.score += SOFT_DROP_POINTS
+                self.score += SOFT_DROP_POINTS
                 self.last_rotate = False
                 self.lock_timer = 0
-            else:
-                break
+        else:
+            # Normal gravity: time-accumulated
+            self._grav_acc = getattr(self, "_grav_acc", 0) + dt_ms
+            while self._grav_acc >= grav and self.current_piece and not self.force_lock:
+                self._grav_acc -= grav
+                if not self._grounded():
+                    self.current_piece["y"] += 1
+                    self.last_rotate = False
+                    self.lock_timer = 0
+                else:
+                    break
 
         if self.current_piece and self._grounded():
             self.lock_timer += dt_ms
