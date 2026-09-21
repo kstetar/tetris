@@ -533,13 +533,26 @@ class Renderer:
             empty = self.font.render("No scores yet. Go make one.", True, (180, 190, 210))
             self.screen.blit(empty, empty.get_rect(center=(self.width // 2, 240)))
         else:
-            header = self.tiny_font.render("    NAME     SCORE     LV   LINES", True, (120, 140, 170))
-            self.screen.blit(header, (90, 130))
+            # Fixed column positions for alignment
+            col_rank = 90
+            col_name = 130
+            col_score = 190
+            col_level = 320
+            col_lines = 370
+            header_color = (120, 140, 170)
+            self.screen.blit(self.font.render("#", True, header_color), (col_rank, 130))
+            self.screen.blit(self.font.render("NAME", True, header_color), (col_name, 130))
+            self.screen.blit(self.font.render("SCORE", True, header_color), (col_score, 130))
+            self.screen.blit(self.font.render("LV", True, header_color), (col_level, 130))
+            self.screen.blit(self.font.render("LINES", True, header_color), (col_lines, 130))
             for i, row in enumerate(scores[:8]):
                 color = COLORS[i % len(COLORS)] if i < 3 else (220, 230, 240)
-                line = f"{i+1:2d}  {row['name']:<3}   {row['score']:>8,}   {row['level']:>3}   {row['lines']:>4}"
-                surf = self.font.render(line, True, color)
-                self.screen.blit(surf, (90, 165 + i * 40))
+                y = 165 + i * 40
+                self.screen.blit(self.font.render(f"{i+1:2d}", True, color), (col_rank, y))
+                self.screen.blit(self.font.render(f"{row['name']:<3}", True, color), (col_name, y))
+                self.screen.blit(self.font.render(f"{row['score']:>8,}", True, color), (col_score, y))
+                self.screen.blit(self.font.render(f"{row['level']:>3}", True, color), (col_level, y))
+                self.screen.blit(self.font.render(f"{row['lines']:>4}", True, color), (col_lines, y))
         hint = self.tiny_font.render("Esc / Enter  back", True, (110, 130, 150))
         self.screen.blit(hint, hint.get_rect(center=(self.width // 2, self.height - 40)))
         self.screen.blit(self._scanlines, (0, 0))
