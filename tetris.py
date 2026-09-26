@@ -11,6 +11,7 @@ from config import (
     BLOCK_SIZE,
     COLS,
     DAS_DELAY_MS,
+    FULLSCREEN_DEFAULT,
     PANEL_WIDTH,
     ROWS,
 )
@@ -24,6 +25,9 @@ MENU, PLAYING, SCORES = "menu", "playing", "scores"
 class TetrisGame:
     def __init__(self, screen):
         self.screen = screen
+        self.fullscreen = FULLSCREEN_DEFAULT
+        self._base_width = COLS * BLOCK_SIZE + PANEL_WIDTH
+        self._base_height = ROWS * BLOCK_SIZE
         self.renderer = Renderer(screen)
         self.game_state = GameState()
         self.sound = SoundManager()
@@ -130,6 +134,9 @@ class TetrisGame:
         if key == pygame.K_F5:
             self.reset_game()
             return
+        if key == pygame.K_F11:
+            self._toggle_fullscreen()
+            return
         if key in (pygame.K_p,):
             if not gs.game_over:
                 gs.paused = not gs.paused
@@ -171,6 +178,28 @@ class TetrisGame:
         elif key in (pygame.K_c, pygame.K_LSHIFT, pygame.K_RSHIFT):
             if gs.hold():
                 self.sound.play_hold()
+
+    def _toggle_fullscreen(self):
+        """Toggle fullscreen mode and recreate display surfaces."""
+        self.fullscreen = not self.fullscreen
+        flags = pygame.FULLSCREEN if self.fullscreen else 0
+        # Get current display info for fullscreen resolution
+        if self.fullscreen:
+            info = pygame.display.Info()
+            new_width, new_height = info.current_w, info.current_h
+        else:
+            new_width, new_height = self._base_width, self._base_height
+
+        try:
+            self.screen = pygame.display.set_mode((new_width, new_height), flags)
+        except pygame.error:
+            # Fallback if mode change fails
+            self.fullscreen = not self.fullscreen
+            self.screen = pygame.display.set_mode((self._base_width, self._base_height))
+
+        # Recreate renderer with new screen
+        self.renderer = Renderer(self.screen)
+        self._sync_hud()
 
     def _handle_das(self, dt):
         gs = self.game_state
@@ -293,8 +322,15 @@ class TetrisGame:
 def main():
     pygame.init()
     pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
+    if FULLSCREEN_DEFAULT:
+        flags = pygame.FULLSCREEN
+        info = pygame.display.Info()
+        width, height = info.current_w, info.current_h
+    else:
+        flags = 0
+        width, height = COLS * BLOCK_SIZE + PANEL_WIDTH, ROWS * BLOCK_SIZE
     try:
-        screen = pygame.display.set_mode((COLS * BLOCK_SIZE + PANEL_WIDTH, ROWS * BLOCK_SIZE))
+        screen = pygame.display.set_mode((width, height), flags)
     except pygame.error as error:
         pygame.quit()
         raise SystemExit(f"Unable to create the game window: {error}") from error

@@ -488,6 +488,7 @@ class Renderer:
             "Space     hard drop",
             "C / Shift hold",
             "M         music",
+            "F11       fullscreen",
         ]
         for i, line in enumerate(lines):
             self._draw_text(line, 48, 270 + i * 28, self.small_font, (210, 220, 235))
